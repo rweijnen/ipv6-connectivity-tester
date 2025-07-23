@@ -16,7 +16,10 @@ param(
     [switch]$Force
 )
 
-Write-Host "Testing IPv6 connectivity for interface: $InterfaceName" -ForegroundColor Green
+$timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+Write-Host "=== IPv6 Connectivity Test ===" -ForegroundColor Cyan
+Write-Host "Timestamp: $timestamp" -ForegroundColor Gray
+Write-Host "Interface: $InterfaceName" -ForegroundColor Green
 Write-Host "Target: $TestTarget" -ForegroundColor Green
 Write-Host ""
 
@@ -53,6 +56,30 @@ if ($ipv6Addresses.Count -eq 0) {
 
 Write-Host "Found IPv6 addresses:" -ForegroundColor Cyan
 $ipv6Addresses | ForEach-Object { Write-Host "  $_" -ForegroundColor White }
+
+# Analyze prefixes
+Write-Host ""
+Write-Host "Prefix Analysis:" -ForegroundColor Cyan
+$prefixGroups = $ipv6Addresses | Group-Object { 
+    $parts = $_ -split ':'
+    if ($parts.Length -ge 4) {
+        # Get first 4 parts of IPv6 address as prefix
+        ($parts[0..3] -join ':') + '::'
+    } else {
+        "Unknown"
+    }
+}
+
+foreach ($group in $prefixGroups) {
+    $prefixName = $group.Name
+    $addressCount = $group.Count
+    Write-Host "  Prefix $prefixName - $addressCount address(es)" -ForegroundColor Gray
+    
+    # Show the specific addresses for this prefix
+    $group.Group | ForEach-Object {
+        Write-Host "    $_" -ForegroundColor DarkGray
+    }
+}
 Write-Host ""
 
 # Test connectivity for each IPv6 address in parallel
@@ -131,10 +158,53 @@ foreach ($jobInfo in $jobs) {
 }
 
 # Summary
-Write-Host "Summary:" -ForegroundColor Cyan
+Write-Host "=== Test Summary ===" -ForegroundColor Cyan
 Write-Host "  Total IPv6 addresses tested: $($ipv6Addresses.Count)" -ForegroundColor White
 Write-Host "  Successful connections: $successCount" -ForegroundColor White
 Write-Host "  Failed connections: $($ipv6Addresses.Count - $successCount)" -ForegroundColor White
+
+# Prefix-based analysis of results
+Write-Host ""
+Write-Host "Results by Prefix:" -ForegroundColor Cyan
+
+# Create a comprehensive results array for analysis
+$allResults = @()
+foreach ($jobInfo in $jobs) {
+    $address = $jobInfo.Address
+    $success = $address -notin $failedAddresses
+    $allResults += @{
+        Address = $address
+        Success = $success
+        Prefix = (($address -split ':')[0..3] -join ':') + '::'
+    }
+}
+
+# Group results by prefix
+$resultsByPrefix = $allResults | Group-Object Prefix
+foreach ($prefixGroup in $resultsByPrefix) {
+    $prefix = $prefixGroup.Name
+    $prefixResults = $prefixGroup.Group
+    $successfulInPrefix = ($prefixResults | Where-Object { $_.Success }).Count
+    $totalInPrefix = $prefixResults.Count
+    $failedInPrefix = $totalInPrefix - $successfulInPrefix
+    
+    $status = if ($successfulInPrefix -eq $totalInPrefix) { "[+] ALL WORKING" } 
+              elseif ($successfulInPrefix -eq 0) { "[-] ALL FAILED" }
+              else { "[!] PARTIAL ($successfulInPrefix/$totalInPrefix working)" }
+    
+    $statusColor = if ($successfulInPrefix -eq $totalInPrefix) { "Green" } 
+                   elseif ($successfulInPrefix -eq 0) { "Red" }
+                   else { "Yellow" }
+    
+    Write-Host "  $prefix - $status" -ForegroundColor $statusColor
+    
+    # Show individual address results for this prefix
+    foreach ($result in $prefixResults) {
+        $resultSymbol = if ($result.Success) { "[+]" } else { "[-]" }
+        $resultColor = if ($result.Success) { "Green" } else { "Red" }
+        Write-Host "    $resultSymbol $($result.Address)" -ForegroundColor $resultColor
+    }
+}
 
 # Handle failed addresses removal
 if ($failedAddresses.Count -gt 0 -and ($RemoveFailedAddresses -or $RemoveFailedRoutes)) {

@@ -3,6 +3,9 @@
 claude.md
 CLAUDE.md
 
+# Temporary files
+temp/
+
 # PowerShell execution policy files
 *.ps1xml
 
